@@ -118,9 +118,25 @@ func (m *Main) Update(msg tea.Msg, a *App) (Page, tea.Cmd) {
 
 		// menu start col, row
 		m.menuStartRow = msg.Height / 3
-		// If dynamic row count is on, we want at most 10 rows at the start to give more space to the entries
-		if m.options.DynamicRowCount && m.menuStartRow > 10 {
-			m.menuStartRow = 10
+
+		// Height of the bottom part of the music player. Used in calculating the number of rows left.
+		// 3 lines for search + 5 lines of lyrics + 6 lines of song name and progress bar = 14. But somehow
+		// 13 works better.
+		bottomHeight := 13
+		numColumns := 1
+		if m.isDualColumn {
+			numColumns = 2
+		}
+		// If dynamic row count is on, we may want to adjust menuStartRow
+		if m.options.DynamicRowCount {
+			if m.options.MaxMenuStartRow > 0 {
+				// Limit menuStartRow to user-defined value
+				if m.menuStartRow > m.options.MaxMenuStartRow {
+					m.menuStartRow = m.options.MaxMenuStartRow
+				}
+			} else if m.options.MaxMenuStartRow == -1 {
+				m.updateMenuStartRow(msg.Height, bottomHeight)
+			}
 		}
 
 		if !m.options.WhetherDisplayTitle && m.menuStartRow > 1 {
@@ -128,15 +144,8 @@ func (m *Main) Update(msg tea.Msg, a *App) (Page, tea.Cmd) {
 		}
 
 		if m.options.DynamicRowCount {
-			numColumns := 1
-			if m.isDualColumn {
-				numColumns = 2
-			}
 			// Compute the maximum number of entries per page based on the number of rows remaining.
-			// 13 is the magic number that works best.
-			// 3 lines for search + 5 lines of lyrics + 6 lines of song name and progress bar = 14. Not
-			// sure where the discrepancy comes from.
-			maxEntries := (msg.Height - m.menuStartRow - 13) * numColumns
+			maxEntries := (msg.Height - m.menuStartRow - bottomHeight) * numColumns
 			if maxEntries > 10 {
 				m.menuPageSize = maxEntries
 			} else {
@@ -181,10 +190,39 @@ func (m *Main) Update(msg tea.Msg, a *App) (Page, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Main) updateMenuStartRow(windowHeight int, bottomHeight int) {
+	// Automatically determine the best starting row for the menu
+	numColumns := 1
+	if m.IsDualColumn() {
+		numColumns = 2
+	}
+	// Compute remaining entries on the menu
+	menuMaxItems := len(m.menuList) - m.menuPageSize*(m.menuCurPage-1)
+	// If dual column, then number of rows is half of number of entries
+	menuMaxRows := int(math.Ceil(float64(menuMaxItems) / float64(numColumns)))
+	remainingRows := windowHeight - bottomHeight - menuMaxRows
+	preferredStart := 7
+	// If menuStartRow is too small, don't do anything
+	if m.menuStartRow > preferredStart {
+		if remainingRows > preferredStart {
+			// We have some empty rows left. The menu is probably pretty short.
+			// Assign half of them to the top so that the top and bottom are evenly balanced.
+			m.menuStartRow = preferredStart + remainingRows/2
+		} else {
+			// We don't have empty rows left. The menu is probably pretty long. Just set menuStartRow
+			// to the preferred value.
+			m.menuStartRow = preferredStart
+		}
+	}
+}
+
 func (m *Main) View(a *App) string {
 	windowHeight, windowWidth := a.WindowHeight(), a.WindowWidth()
 	if windowHeight <= 0 || windowWidth <= 0 {
 		return ""
+	}
+	if m.options.MaxMenuStartRow == -1 {
+		m.updateMenuStartRow(windowHeight, 13)
 	}
 
 	var (
